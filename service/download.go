@@ -29,10 +29,8 @@ func DoWorkerRequest(req *WorkerRequest) (*http.Response, error) {
 		return nil, fmt.Errorf("only support https url")
 	}
 
-	// SSRF防护：验证请求URL
-	fetchSetting := system_setting.GetFetchSetting()
-	if err := common.ValidateURLWithFetchSetting(req.URL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
-		return nil, fmt.Errorf("request reject: %v", err)
+	if err := ValidateOutboundURL(nil, req.URL); err != nil {
+		return nil, fmt.Errorf("request reject")
 	}
 
 	workerUrl := system_setting.WorkerUrl
@@ -58,10 +56,8 @@ func DoDownloadRequest(originUrl string, reason ...string) (resp *http.Response,
 		}
 		return DoWorkerRequest(req)
 	} else {
-		// SSRF防护：验证请求URL（非Worker模式）
-		fetchSetting := system_setting.GetFetchSetting()
-		if err := common.ValidateURLWithFetchSetting(originUrl, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
-			return nil, fmt.Errorf("request reject: %v", err)
+		if err := ValidateOutboundURL(nil, originUrl); err != nil {
+			return nil, fmt.Errorf("request reject")
 		}
 
 		common.SysLog(fmt.Sprintf("downloading from origin: %s, reason: %s", common.MaskSensitiveInfo(originUrl), strings.Join(reason, ", ")))

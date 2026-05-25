@@ -130,15 +130,17 @@ docker pull calciumion/new-api:latest
 
 # 使用 SQLite（默认）
 docker run --name new-api -d --restart always \
-  -p 3000:3000 \
+  -p 127.0.0.1:3002:3000 \
+  -e CRYPTO_SECRET="replace-with-a-long-random-crypto-secret" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
 # 使用 MySQL
 docker run --name new-api -d --restart always \
-  -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -p 127.0.0.1:3002:3000 \
+  -e CRYPTO_SECRET="replace-with-a-long-random-crypto-secret" \
+  -e SQL_DSN="${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -150,7 +152,7 @@ docker run --name new-api -d --restart always \
 
 ---
 
-🎉 部署完成后，访问 `http://localhost:3000` 即可使用！
+🎉 部署完成后，本机访问 `http://127.0.0.1:3002`，或通过反向代理访问即可使用！
 
 > [!WARNING]
 > 将本项目作为面向公众的生成式 AI 服务或 API 转售服务运营时，使用者应先完成备案、内容安全、实名、日志留存、税务、支付和上游授权等合规义务。
@@ -313,7 +315,7 @@ docker run --name new-api -d --restart always \
 | 变量名 | 说明                                                           | 默认值 |
 |--------|--------------------------------------------------------------|--------|
 | `SESSION_SECRET` | 会话密钥（多机部署必须）                                                 | - |
-| `CRYPTO_SECRET` | 加密密钥（Redis 必须）                                               | - |
+| `CRYPTO_SECRET` | 渠道/API Key 加密密钥（生产环境必须）                                  | - |
 | `SQL_DSN` | 数据库连接字符串                                                     | - |
 | `REDIS_CONN_STRING` | Redis 连接字符串                                                  | - |
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
@@ -358,7 +360,8 @@ docker-compose up -d
 **使用 SQLite：**
 ```bash
 docker run --name new-api -d --restart always \
-  -p 3000:3000 \
+  -p 127.0.0.1:3002:3000 \
+  -e CRYPTO_SECRET="replace-with-a-long-random-crypto-secret" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -367,8 +370,9 @@ docker run --name new-api -d --restart always \
 **使用 MySQL：**
 ```bash
 docker run --name new-api -d --restart always \
-  -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -p 127.0.0.1:3002:3000 \
+  -e CRYPTO_SECRET="replace-with-a-long-random-crypto-secret" \
+  -e SQL_DSN="${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -395,7 +399,7 @@ docker run --name new-api -d --restart always \
 
 > [!WARNING]
 > - **必须设置** `SESSION_SECRET` - 否则登录状态不一致
-> - **公用 Redis 必须设置** `CRYPTO_SECRET` - 否则数据无法解密
+> - **生产环境必须设置** `CRYPTO_SECRET` - 否则渠道密钥无法安全加密/解密
 
 ### 🔄 渠道重试与缓存
 

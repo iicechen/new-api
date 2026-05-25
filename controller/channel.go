@@ -1054,7 +1054,6 @@ func FetchModels(c *gin.Context) {
 		return
 	}
 
-	client := &http.Client{}
 	url := fmt.Sprintf("%s/v1/models", baseURL)
 
 	request, err := http.NewRequest("GET", url, nil)
@@ -1068,7 +1067,7 @@ func FetchModels(c *gin.Context) {
 
 	request.Header.Set("Authorization", "Bearer "+key)
 
-	response, err := client.Do(request)
+	response, err := service.GetHttpClient().Do(request)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -1339,10 +1338,7 @@ func ManageMultiKeys(c *gin.Context) {
 			}
 
 			// Create key preview (first 10 chars)
-			keyPreview := key
-			if len(key) > 10 {
-				keyPreview = key[:10] + "..."
-			}
+			keyPreview := common.MaskSecret(key)
 
 			allKeyStatusList = append(allKeyStatusList, KeyStatus{
 				Index:        i,

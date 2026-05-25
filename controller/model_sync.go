@@ -15,6 +15,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -103,6 +104,9 @@ func newHTTPClient() *http.Client {
 		transport.TLSClientConfig = common.InsecureTLSConfig
 	}
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if err := common.ValidateOutboundDialAddress(addr, false); err != nil {
+			return nil, err
+		}
 		host, _, err := net.SplitHostPort(addr)
 		if err != nil {
 			host = addr
@@ -115,7 +119,18 @@ func newHTTPClient() *http.Client {
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}
-	return &http.Client{Transport: transport}
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if err := service.ValidateOutboundURL(req.Context(), req.URL.String()); err != nil {
+				return errors.New("redirect blocked")
+			}
+			return nil
+		},
+	}
 }
 
 var (
@@ -131,6 +146,9 @@ func getHTTPClient() *http.Client {
 }
 
 func fetchJSON[T any](ctx context.Context, url string, out *upstreamEnvelope[T]) error {
+	if err := service.ValidateOutboundURL(ctx, url); err != nil {
+		return fmt.Errorf("upstream URL blocked")
+	}
 	var lastErr error
 	attempts := common.GetEnvOrDefault("SYNC_HTTP_RETRY", 3)
 	if attempts < 1 {

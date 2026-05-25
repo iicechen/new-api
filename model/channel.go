@@ -346,11 +346,43 @@ func (channel *Channel) Save() error {
 	return DB.Save(channel).Error
 }
 
+func (channel *Channel) BeforeSave(tx *gorm.DB) error {
+	if channel == nil || strings.TrimSpace(channel.Key) == "" {
+		return nil
+	}
+	encrypted, err := common.EncryptSecretIfNeeded(channel.Key)
+	if err != nil {
+		return err
+	}
+	channel.Key = encrypted
+	return nil
+}
+
+func (channel *Channel) AfterFind(tx *gorm.DB) error {
+	if channel == nil || strings.TrimSpace(channel.Key) == "" {
+		return nil
+	}
+	decrypted, err := common.DecryptSecretIfNeeded(channel.Key)
+	if err != nil {
+		return err
+	}
+	channel.Key = decrypted
+	return nil
+}
+
 func (channel *Channel) SaveWithoutKey() error {
 	if channel.Id == 0 {
 		return errors.New("channel ID is 0")
 	}
 	return DB.Omit("key").Save(channel).Error
+}
+
+func UpdateChannelKey(channelId int, key string) error {
+	encrypted, err := common.EncryptSecretIfNeeded(key)
+	if err != nil {
+		return err
+	}
+	return DB.Model(&Channel{}).Where("id = ?", channelId).Update("key", encrypted).Error
 }
 
 func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {

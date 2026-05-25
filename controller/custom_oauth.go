@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -160,9 +160,8 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 	}
 	targetURL = strings.TrimSpace(targetURL)
 
-	parsedURL, err := url.Parse(targetURL)
-	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		common.ApiErrorMsg(c, "Discovery URL 无效，仅支持 http/https")
+	if err := service.ValidateOutboundURL(c.Request.Context(), targetURL); err != nil {
+		common.ApiErrorMsg(c, "Discovery URL 无效或不允许访问")
 		return
 	}
 
@@ -176,7 +175,7 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 	}
 	httpReq.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := service.GetHttpClient()
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		common.ApiErrorMsg(c, "获取 Discovery 配置失败: "+err.Error())
