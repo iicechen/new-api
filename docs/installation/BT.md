@@ -41,12 +41,12 @@
 3. 点击 **安装**
 4. 配置以下基本选项：
    - **容器名称**：可自定义，默认为 `new-api`
-   - **端口映射**：默认为 `3000:3000`
+   - **端口映射**：建议使用 `127.0.0.1:3002:3000`，再通过 Nginx 反向代理访问
    - **环境变量**：
      - `SESSION_SECRET`：会话密钥（**必填**，多机部署时必须一致）
-     - `CRYPTO_SECRET`：加密密钥（使用 Redis 时必填）
+     - `CRYPTO_SECRET`：渠道/API Key 加密密钥（生产环境必填）
 5. 点击 **确认** 开始安装
-6. 等待安装完成后，访问 `http://您的服务器IP:3000` 即可使用
+6. 等待安装完成后，通过 Nginx 反向代理访问；不要直接将容器端口暴露到公网
 
 ### 方法二：使用 Docker Compose
 
@@ -61,11 +61,12 @@ services:
     container_name: new-api
     restart: always
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3002:3000"
     volumes:
       - ./data:/data
     environment:
       - SESSION_SECRET=your_session_secret_here  # 请修改为随机字符串
+      - CRYPTO_SECRET=your_crypto_secret_here  # 生产环境必填，请修改为随机字符串
       - TZ=Asia/Shanghai
 ```
 
@@ -85,7 +86,7 @@ docker-compose up -d
 | 变量名                 | 说明                 | 是否必填   |
 | ------------------- | ------------------ | ------ |
 | `SESSION_SECRET`    | 会话密钥，多机部署必须一致      | **必填** |
-| `CRYPTO_SECRET`     | 加密密钥，使用 Redis 时必填  | 条件必填   |
+| `CRYPTO_SECRET`     | 渠道/API Key 加密密钥，生产环境必填 | **必填** |
 | `SQL_DSN`           | 数据库连接字符串（使用外部数据库时） | 可选     |
 | `REDIS_CONN_STRING` | Redis 连接字符串        | 可选     |
 
@@ -94,6 +95,9 @@ docker-compose up -d
 ```bash
 # 生成 SESSION_SECRET
 openssl rand -hex 16
+
+# 生成 CRYPTO_SECRET
+openssl rand -hex 32
 
 # 或使用 Linux 命令
 head -c 16 /dev/urandom | xxd -p
@@ -148,4 +152,3 @@ docker-compose down && docker-compose up -d
 ![宝塔面板 Docker 安装](https://github.com/user-attachments/assets/7a6fc03e-c457-45e4-b8f9-184508fc26b0)
 
 > ⚠️ 注意：密钥为环境变量 `SESSION_SECRET`，请务必设置！
-

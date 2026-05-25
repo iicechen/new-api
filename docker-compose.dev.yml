@@ -23,14 +23,19 @@ services:
     container_name: new-api-dev
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3002:3000"
     volumes:
       - dev_data:/data
     environment:
-      - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
+      - CRYPTO_SECRET=${CRYPTO_SECRET:?set CRYPTO_SECRET in .env}
+      - SQL_DSN=postgresql://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-new-api}
       - REDIS_CONN_STRING=redis://redis
       - TZ=Asia/Shanghai
       - BATCH_UPDATE_ENABLED=true
+    logging:
+      options:
+        max-size: "100m"
+        max-file: "3"
     depends_on:
       redis:
         condition: service_started
@@ -45,15 +50,19 @@ services:
     restart: unless-stopped
     networks:
       - dev-network
+    logging:
+      options:
+        max-size: "100m"
+        max-file: "3"
 
   postgres:
     image: postgres:15-alpine
     container_name: new-api-dev-pg
     restart: unless-stopped
     environment:
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: 123456
-      POSTGRES_DB: new-api
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-new-api}
     volumes:
       - dev_pg_data:/var/lib/postgresql/data
     networks:
@@ -63,6 +72,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    logging:
+      options:
+        max-size: "100m"
+        max-file: "3"
 
 volumes:
   dev_data:

@@ -58,6 +58,8 @@ func InitEnv() {
 	}
 	if os.Getenv("CRYPTO_SECRET") != "" {
 		CryptoSecret = os.Getenv("CRYPTO_SECRET")
+	} else if isProductionEnv() {
+		log.Fatal("CRYPTO_SECRET must be set in production")
 	} else {
 		CryptoSecret = SessionSecret
 	}
@@ -126,6 +128,16 @@ func InitEnv() {
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
+}
+
+func isProductionEnv() bool {
+	for _, env := range []string{"GIN_MODE", "NODE_ENV", "APP_ENV", "GO_ENV"} {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv(env))) {
+		case "release", "production", "prod":
+			return true
+		}
+	}
+	return false
 }
 
 func initConstantEnv() {

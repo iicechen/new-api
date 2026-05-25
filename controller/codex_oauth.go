@@ -213,7 +213,7 @@ func completeCodexOAuthWithChannelID(c *gin.Context, channelID int) {
 	_ = session.Save()
 
 	if channelID > 0 {
-		if err := model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("key", string(encoded)).Error; err != nil {
+		if err := model.UpdateChannelKey(channelID, string(encoded)); err != nil {
 			common.ApiError(c, err)
 			return
 		}

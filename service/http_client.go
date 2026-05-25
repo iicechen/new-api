@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -21,11 +22,70 @@ var (
 	proxyClients    = make(map[string]*http.Client)
 )
 
-func checkRedirect(req *http.Request, via []*http.Request) error {
+const maxOutboundResponseBytes int64 = 128 << 20
+
+func ValidateOutboundURL(ctx context.Context, rawURL string) error {
 	fetchSetting := system_setting.GetFetchSetting()
+	if err := common.ValidateURLWithFetchSetting(rawURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+		return err
+	}
+	if !fetchSetting.EnableSSRFProtection || fetchSetting.AllowPrivateIp {
+		return nil
+	}
+	return common.ValidateOutboundURL(ctx, rawURL)
+}
+
+type safeRoundTripper struct {
+	base http.RoundTripper
+}
+
+func (t safeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, fmt.Errorf("invalid outbound request")
+	}
+	if err := ValidateOutboundURL(req.Context(), req.URL.String()); err != nil {
+		return nil, fmt.Errorf("outbound request blocked")
+	}
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	resp, err := base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp != nil && resp.Body != nil {
+		resp.Body = &limitedReadCloser{
+			reader: io.LimitReader(resp.Body, maxOutboundResponseBytes+1),
+			closer: resp.Body,
+		}
+	}
+	return resp, nil
+}
+
+type limitedReadCloser struct {
+	reader io.Reader
+	closer io.Closer
+	read   int64
+}
+
+func (r *limitedReadCloser) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.read += int64(n)
+	if r.read > maxOutboundResponseBytes {
+		return n, fmt.Errorf("outbound response too large")
+	}
+	return n, err
+}
+
+func (r *limitedReadCloser) Close() error {
+	return r.closer.Close()
+}
+
+func checkRedirect(req *http.Request, via []*http.Request) error {
 	urlStr := req.URL.String()
-	if err := common.ValidateURLWithFetchSetting(urlStr, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
-		return fmt.Errorf("redirect to %s blocked: %v", urlStr, err)
+	if err := ValidateOutboundURL(req.Context(), urlStr); err != nil {
+		return fmt.Errorf("redirect blocked")
 	}
 	if len(via) >= 10 {
 		return fmt.Errorf("stopped after 10 redirects")
@@ -33,11 +93,25 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+func dialContextWithOutboundValidation(base *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	if base == nil {
+		base = &net.Dialer{}
+	}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if err := common.ValidateOutboundDialAddress(addr, system_setting.GetFetchSetting().AllowPrivateIp); err != nil {
+			return nil, err
+		}
+		return base.DialContext(ctx, network, addr)
+	}
+}
+
 func InitHttpClient() {
+	dialer := &net.Dialer{}
 	transport := &http.Transport{
 		MaxIdleConns:        common.RelayMaxIdleConns,
 		MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
 		ForceAttemptHTTP2:   true,
+		DialContext:         dialContextWithOutboundValidation(dialer),
 		Proxy:               http.ProxyFromEnvironment, // Support HTTP_PROXY, HTTPS_PROXY, NO_PROXY env vars
 	}
 	if common.TLSInsecureSkipVerify {
@@ -46,12 +120,12 @@ func InitHttpClient() {
 
 	if common.RelayTimeout == 0 {
 		httpClient = &http.Client{
-			Transport:     transport,
+			Transport:     safeRoundTripper{base: transport},
 			CheckRedirect: checkRedirect,
 		}
 	} else {
 		httpClient = &http.Client{
-			Transport:     transport,
+			Transport:     safeRoundTripper{base: transport},
 			Timeout:       time.Duration(common.RelayTimeout) * time.Second,
 			CheckRedirect: checkRedirect,
 		}
@@ -75,11 +149,20 @@ func ResetProxyClientCache() {
 	proxyClientLock.Lock()
 	defer proxyClientLock.Unlock()
 	for _, client := range proxyClients {
-		if transport, ok := client.Transport.(*http.Transport); ok && transport != nil {
-			transport.CloseIdleConnections()
-		}
+		closeIdleConnections(client.Transport)
 	}
 	proxyClients = make(map[string]*http.Client)
+}
+
+func closeIdleConnections(roundTripper http.RoundTripper) {
+	switch transport := roundTripper.(type) {
+	case *http.Transport:
+		if transport != nil {
+			transport.CloseIdleConnections()
+		}
+	case safeRoundTripper:
+		closeIdleConnections(transport.base)
+	}
 }
 
 // NewProxyHttpClient 创建支持代理的 HTTP 客户端
@@ -105,17 +188,19 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 
 	switch parsedURL.Scheme {
 	case "http", "https":
+		dialer := &net.Dialer{}
 		transport := &http.Transport{
 			MaxIdleConns:        common.RelayMaxIdleConns,
 			MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
 			ForceAttemptHTTP2:   true,
+			DialContext:         dialContextWithOutboundValidation(dialer),
 			Proxy:               http.ProxyURL(parsedURL),
 		}
 		if common.TLSInsecureSkipVerify {
 			transport.TLSClientConfig = common.InsecureTLSConfig
 		}
 		client := &http.Client{
-			Transport:     transport,
+			Transport:     safeRoundTripper{base: transport},
 			CheckRedirect: checkRedirect,
 		}
 		client.Timeout = time.Duration(common.RelayTimeout) * time.Second
@@ -149,6 +234,9 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 			MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
 			ForceAttemptHTTP2:   true,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if err := common.ValidateOutboundDialAddress(addr, system_setting.GetFetchSetting().AllowPrivateIp); err != nil {
+					return nil, err
+				}
 				return dialer.Dial(network, addr)
 			},
 		}
@@ -156,7 +244,7 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 			transport.TLSClientConfig = common.InsecureTLSConfig
 		}
 
-		client := &http.Client{Transport: transport, CheckRedirect: checkRedirect}
+		client := &http.Client{Transport: safeRoundTripper{base: transport}, CheckRedirect: checkRedirect}
 		client.Timeout = time.Duration(common.RelayTimeout) * time.Second
 		proxyClientLock.Lock()
 		proxyClients[proxyURL] = client
